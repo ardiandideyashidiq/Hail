@@ -181,20 +181,21 @@ fun AppsScreen(
                 items(
                     items = apps,
                     key = { it.packageName },
+                    contentType = { "app_item" },
                 ) { info ->
                     val pkg = info.packageName
                     val isChecked = pkg in checkedPackages
                     AppItemCard(
                         info = info,
                         isChecked = isChecked,
-                        onToggleChecked = { onToggleChecked(pkg) },
-                        onActionDetails = { onActionDetails(info) },
-                        onActionLaunch = { onActionLaunch(info) },
-                        onActionToggleFreeze = { frozen -> onActionToggleFreeze(info, frozen) },
-                        onActionExportClipboard = { onActionExportClipboard(info) },
-                        onActionExtractApk = { onActionExtractApk(info) },
-                        onActionUninstall = { onActionUninstall(info) },
-                        onActionReinstall = { onActionReinstall(info) },
+                        onToggleChecked = remember(pkg, onToggleChecked) { { onToggleChecked(pkg) } },
+                        onActionDetails = remember(pkg, onActionDetails) { { onActionDetails(info) } },
+                        onActionLaunch = remember(pkg, onActionLaunch) { { onActionLaunch(info) } },
+                        onActionToggleFreeze = remember(pkg, onActionToggleFreeze) { { frozen -> onActionToggleFreeze(info, frozen) } },
+                        onActionExportClipboard = remember(pkg, onActionExportClipboard) { { onActionExportClipboard(info) } },
+                        onActionExtractApk = remember(pkg, onActionExtractApk) { { onActionExtractApk(info) } },
+                        onActionUninstall = remember(pkg, onActionUninstall) { { onActionUninstall(info) } },
+                        onActionReinstall = remember(pkg, onActionReinstall) { { onActionReinstall(info) } },
                     )
                 }
             }
@@ -225,6 +226,9 @@ fun AppsScreen(
     }
 }
 
+private val AppItemDefaultShape = RoundedCornerShape(20.dp)
+private val AppItemCheckedShape = RoundedCornerShape(28.dp)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AppItemCard(
@@ -254,15 +258,10 @@ private fun AppItemCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = if (isPressed) 0.97f else 1f,
         animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
         label = "AppCardScale",
-    )
-    val cornerRadius by animateDpAsState(
-        targetValue = if (isChecked) 28.dp else 20.dp,
-        animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
-        label = "AppCardCorner",
     )
     val containerColor by animateColorAsState(
         targetValue = if (isChecked) {
@@ -284,15 +283,20 @@ private fun AppItemCard(
     )
 
     val iconSizePx = with(LocalDensity.current) { 48.dp.roundToPx() }
-    val iconBitmap by produceState<Bitmap?>(
-        initialValue = null,
+    val cachedIcon = remember(pkg, iconSizePx, HailData.synthesizeAdaptiveIcons) {
+        AppIconCache.getCachedBitmap(pkg, HPackages.myUserId, iconSizePx)?.asImageBitmap()
+    }
+    val iconBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = cachedIcon,
         key1 = pkg,
         key2 = HailData.synthesizeAdaptiveIcons,
     ) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                AppIconCache.getOrLoadBitmap(context, info, HPackages.myUserId, iconSizePx)
-            }.getOrNull()
+        if (value == null) {
+            value = withContext(Dispatchers.IO) {
+                runCatching {
+                    AppIconCache.getOrLoadBitmap(context, info, HPackages.myUserId, iconSizePx).asImageBitmap()
+                }.getOrNull()
+            }
         }
     }
     val grayscaleFilter = remember {
@@ -308,8 +312,9 @@ private fun AppItemCard(
             .fillMaxWidth()
             .heightIn(min = 64.dp)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = scaleState.value
+                scaleX = s
+                scaleY = s
             }
             .combinedClickable(
                 interactionSource = interactionSource,
@@ -317,7 +322,7 @@ private fun AppItemCard(
                 onClick = onToggleChecked,
                 onLongClick = { menuExpanded = true },
             ),
-        shape = RoundedCornerShape(cornerRadius),
+        shape = if (isChecked) AppItemCheckedShape else AppItemDefaultShape,
         color = containerColor,
         contentColor = contentColor,
     ) {
@@ -334,7 +339,7 @@ private fun AppItemCard(
                 val bmp = iconBitmap
                 if (bmp != null) {
                     Image(
-                        bitmap = bmp.asImageBitmap(),
+                        bitmap = bmp,
                         contentDescription = null,
                         modifier = Modifier.size(44.dp),
                         colorFilter = if (isDimmed) grayscaleFilter else null,

@@ -65,6 +65,10 @@ object AppIconCache : CoroutineScope {
         return lruCache[Triple(packageName, userId, size)]
     }
 
+    /** Fast synchronous lookup from the in-memory LRU cache without touching disk or loaders. */
+    fun getCachedBitmap(packageName: String, userId: Int, size: Int): Bitmap? =
+        get(packageName, userId, size)
+
     private fun put(packageName: String, userId: Int, size: Int, bitmap: Bitmap) {
         if (get(packageName, userId, size) == null) {
             lruCache.put(Triple(packageName, userId, size), bitmap)

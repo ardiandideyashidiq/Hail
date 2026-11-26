@@ -1,9 +1,13 @@
 package com.aistra.hail.ui.components
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.animateColor
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,6 +15,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -47,7 +52,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import kotlin.math.roundToInt
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -106,94 +113,121 @@ fun FloatingPillNavBar(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
             ),
         ) {
-            Row(
+            val selectedIndex = items.indexOfFirst { it.id == selectedItemId }.coerceAtLeast(0)
+            val animatedIndexState = animateFloatAsState(
+                targetValue = selectedIndex.toFloat(),
+                animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
+                label = "FloatingNavPillIndex",
+            )
+            val density = LocalDensity.current
+            val spacingPx = with(density) { 4.dp.toPx() }
+            val indicatorColor = MaterialTheme.colorScheme.secondaryContainer
+
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                items.forEach { item ->
-                    val isSelected = item.id == selectedItemId
-                    val interactionSource = remember(item.id) { MutableInteractionSource() }
-                    val isPressed by interactionSource.collectIsPressedAsState()
-
-                    val scale by animateFloatAsState(
-                        targetValue = when {
-                            isPressed -> 0.94f
-                            isSelected -> 1.04f
-                            else -> 1f
-                        },
-                        animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
-                        label = "FloatingNavScale",
-                    )
-                    val nudgeY by animateDpAsState(
-                        targetValue = if (isSelected) (-1).dp else 0.dp,
-                        animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
-                        label = "FloatingNavNudgeY",
-                    )
-                    val indicatorColor by animateColorAsState(
-                        targetValue = if (isSelected) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            Color.Transparent
-                        },
-                        animationSpec = HailMotionTokens.fastEffectsOrSnap(reducedMotion),
-                        label = "FloatingNavIndicator",
-                    )
-                    val contentColor by animateColorAsState(
-                        targetValue = if (isSelected) {
-                            MaterialTheme.colorScheme.onSecondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        animationSpec = HailMotionTokens.fastEffectsOrSnap(reducedMotion),
-                        label = "FloatingNavContent",
-                    )
+                if (items.isNotEmpty()) {
+                    val totalSpacingDp = 4.dp * (items.size - 1)
+                    val slotWidthDp = (maxWidth - totalSpacingDp) / items.size
+                    val slotWidthPx = with(density) { slotWidthDp.toPx() }
+                    val slotStepPx = slotWidthPx + spacingPx
 
                     Box(
                         modifier = Modifier
-                            .weight(1f)
+                            .width(slotWidthDp)
                             .heightIn(min = 52.dp)
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                translationY = nudgeY.toPx()
+                            .offset {
+                                IntOffset((animatedIndexState.value * slotStepPx).roundToInt(), 0)
                             }
                             .clip(RoundedCornerShape(24.dp))
-                            .background(indicatorColor)
-                            .semantics {
-                                role = Role.Tab
-                                selected = isSelected
+                            .background(indicatorColor),
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    items.forEach { item ->
+                        val isSelected = item.id == selectedItemId
+                        val interactionSource = remember(item.id) { MutableInteractionSource() }
+                        val isPressed by interactionSource.collectIsPressedAsState()
+
+                        val transition = updateTransition(
+                            targetState = isSelected,
+                            label = "FloatingNavItem_${item.id}",
+                        )
+                        val pressScaleState = animateFloatAsState(
+                            targetValue = if (isPressed) 0.94f else 1f,
+                            animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
+                            label = "FloatingNavPress",
+                        )
+                        val selectedScaleState = transition.animateFloat(
+                            transitionSpec = { HailMotionTokens.fastSpatialOrSnap(reducedMotion) },
+                            label = "FloatingNavSelectedScale",
+                        ) { selected -> if (selected) 1.04f else 1f }
+                        val nudgeYState = transition.animateDp(
+                            transitionSpec = { HailMotionTokens.fastSpatialOrSnap(reducedMotion) },
+                            label = "FloatingNavNudgeY",
+                        ) { selected -> if (selected) (-1).dp else 0.dp }
+                        val contentColor by transition.animateColor(
+                            transitionSpec = { HailMotionTokens.fastEffectsOrSnap(reducedMotion) },
+                            label = "FloatingNavContent",
+                        ) { selected ->
+                            if (selected) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             }
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = null,
-                                onClick = { onItemSelected(item.id) },
-                            )
-                            .padding(horizontal = 6.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CompositionLocalProvider(LocalContentColor provides contentColor) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                            ) {
-                                Icon(
-                                    painter = painterResource(
-                                        if (isSelected) item.selectedIconRes else item.iconRes,
-                                    ),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(22.dp),
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 52.dp)
+                                .graphicsLayer {
+                                    val s = pressScaleState.value * selectedScaleState.value
+                                    scaleX = s
+                                    scaleY = s
+                                    translationY = nudgeYState.value.toPx()
+                                }
+                                .clip(RoundedCornerShape(24.dp))
+                                .semantics {
+                                    role = Role.Tab
+                                    selected = isSelected
+                                }
+                                .clickable(
+                                    interactionSource = interactionSource,
+                                    indication = null,
+                                    onClick = { onItemSelected(item.id) },
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = item.label,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CompositionLocalProvider(LocalContentColor provides contentColor) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Icon(
+                                        painter = painterResource(
+                                            if (isSelected) item.selectedIconRes else item.iconRes,
+                                        ),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = item.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                         }
                     }
@@ -243,7 +277,7 @@ fun ExpressiveNavRail(
                     val interactionSource = remember(item.id) { MutableInteractionSource() }
                     val isPressed by interactionSource.collectIsPressedAsState()
 
-                    val scale by animateFloatAsState(
+                    val scaleState = animateFloatAsState(
                         targetValue = when {
                             isPressed -> 0.94f
                             isSelected -> 1.04f
@@ -252,7 +286,7 @@ fun ExpressiveNavRail(
                         animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
                         label = "RailNavScale",
                     )
-                    val nudgeX by animateDpAsState(
+                    val nudgeXState = animateDpAsState(
                         targetValue = if (isSelected) 2.dp else 0.dp,
                         animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
                         label = "RailNavNudgeX",
@@ -281,9 +315,10 @@ fun ExpressiveNavRail(
                             .widthIn(min = 64.dp)
                             .heightIn(min = 56.dp)
                             .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                translationX = nudgeX.toPx()
+                                val s = scaleState.value
+                                scaleX = s
+                                scaleY = s
+                                translationX = nudgeXState.value.toPx()
                             }
                             .clip(RoundedCornerShape(22.dp))
                             .background(indicatorColor)
@@ -573,16 +608,17 @@ fun TactilePillTab(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    val scale by animateFloatAsState(
-        targetValue = when {
-            isPressed -> 0.94f
-            selected -> 1.03f
-            else -> 1f
-        },
+    val transition = updateTransition(targetState = selected, label = "TactilePillTab")
+    val pressScaleState = animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
         animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
-        label = "TactilePillTabScale",
+        label = "TactilePillTabPress",
     )
-    val nudgeOffsetX by animateDpAsState(
+    val selectedScaleState = transition.animateFloat(
+        transitionSpec = { HailMotionTokens.fastSpatialOrSnap(reducedMotion) },
+        label = "TactilePillTabSelectedScale",
+    ) { isSel -> if (isSel) 1.03f else 1f }
+    val nudgeOffsetXState = animateDpAsState(
         targetValue = when {
             index == selectedIndex - 1 -> (-3).dp
             index == selectedIndex + 1 -> 3.dp
@@ -591,32 +627,35 @@ fun TactilePillTab(
         animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
         label = "TactilePillTabNudgeX",
     )
-    val containerColor by animateColorAsState(
-        targetValue = if (selected) {
+    val containerColor by transition.animateColor(
+        transitionSpec = { HailMotionTokens.fastEffectsOrSnap(reducedMotion) },
+        label = "TactilePillTabContainer",
+    ) { isSel ->
+        if (isSel) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
             MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-        animationSpec = HailMotionTokens.fastEffectsOrSnap(reducedMotion),
-        label = "TactilePillTabContainer",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) {
+        }
+    }
+    val contentColor by transition.animateColor(
+        transitionSpec = { HailMotionTokens.fastEffectsOrSnap(reducedMotion) },
+        label = "TactilePillTabContent",
+    ) { isSel ->
+        if (isSel) {
             MaterialTheme.colorScheme.onPrimaryContainer
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        animationSpec = HailMotionTokens.fastEffectsOrSnap(reducedMotion),
-        label = "TactilePillTabContent",
-    )
+        }
+    }
 
     Surface(
         modifier = modifier
             .heightIn(min = 48.dp)
-            .offset { IntOffset(nudgeOffsetX.roundToPx(), 0) }
+            .offset { IntOffset(nudgeOffsetXState.value.roundToPx(), 0) }
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = pressScaleState.value * selectedScaleState.value
+                scaleX = s
+                scaleY = s
             }
             .semantics {
                 role = Role.Tab

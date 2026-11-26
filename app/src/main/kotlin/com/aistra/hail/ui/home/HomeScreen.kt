@@ -36,6 +36,9 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -145,7 +148,6 @@ fun HomeScreen(
     onCloseMultiselect: () -> Unit,
 ) {
     val reducedMotion = rememberReducedMotion()
-    val coroutineScope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val useRail = isLandscape || configuration.screenWidthDp >= 600
@@ -164,12 +166,15 @@ fun HomeScreen(
     LaunchedEffect(selectedTagIndex, tags.size) {
         val target = selectedTagIndex.coerceIn(0, safePageCount - 1)
         if (pagerState.currentPage != target) {
-            pagerState.animateScrollToPage(target)
+            pagerState.animateScrollToPage(
+                page = target,
+                animationSpec = HailMotionTokens.defaultSpatialOrSnap(reducedMotion),
+            )
         }
     }
 
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }
+        snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
             .collect { page ->
                 if (page != selectedTagIndex && page < tags.size) {
@@ -194,12 +199,7 @@ fun HomeScreen(
                 TagSelectorBar(
                     tags = tags,
                     selectedIndex = selectedTagIndex.coerceIn(0, tags.lastIndex),
-                    onSelect = { index ->
-                        onSelectTag(index)
-                        coroutineScope.launch {
-                            pagerState.animateScrollToPage(index)
-                        }
-                    },
+                    onSelect = onSelectTag,
                     onTagLongClick = onTagLongClick,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -384,19 +384,28 @@ private fun TagSelectorBar(
     onTagLongClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(selectedIndex, tags.size) {
+        if (tags.isNotEmpty() && selectedIndex in tags.indices) {
+            listState.animateScrollToItem(selectedIndex)
+        }
+    }
+
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .horizontalScroll(rememberScrollState()),
+        LazyRow(
+            state = listState,
+            modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            tags.forEachIndexed { index, (label, _) ->
+            itemsIndexed(
+                items = tags,
+                key = { _, tag -> tag.second },
+            ) { index, (label, _) ->
                 TactilePillTab(
                     selected = index == selectedIndex,
                     onClick = { onSelect(index) },
@@ -483,7 +492,10 @@ private fun AppGridContent(
         items(
             items = apps,
             key = { it.packageName },
+            contentType = { "app_card" },
         ) { info ->
+            val onClick = remember(info.packageName, onAppClick) { { onAppClick(info) } }
+            val onLongClick = remember(info.packageName, onAppLongClick) { { onAppLongClick(info) } }
             AppCard(
                 info = info,
                 isSelected = info.packageName in selectedPackages,
@@ -492,12 +504,15 @@ private fun AppGridContent(
                 grayscaleIcon = grayscaleIcon,
                 synthesizeAdaptiveIcons = synthesizeAdaptiveIcons,
                 reducedMotion = reducedMotion,
-                onClick = { onAppClick(info) },
-                onLongClick = { onAppLongClick(info) },
+                onClick = onClick,
+                onLongClick = onLongClick,
             )
         }
     }
 }
+
+private val AppCardDefaultShape = RoundedCornerShape(16.dp)
+private val AppCardSelectedShape = RoundedCornerShape(28.dp)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -519,12 +534,7 @@ private fun AppCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    val cornerRadius by animateDpAsState(
-        targetValue = if (isSelected) 28.dp else 16.dp,
-        animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
-        label = "AppCardCorner",
-    )
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = if (isPressed) 0.96f else 1f,
         animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
         label = "AppCardScale",
@@ -547,14 +557,15 @@ private fun AppCard(
     }
 
     val iconSize = dimensionResource(R.dimen.app_icon_size)
-    val shape = RoundedCornerShape(cornerRadius)
+    val shape = if (isSelected) AppCardSelectedShape else AppCardDefaultShape
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = scaleState.value
+                scaleX = s
+                scaleY = s
             }
             .clip(shape)
             .combinedClickable(
@@ -675,20 +686,25 @@ private fun AppIconImage(
     val context = LocalContext.current
     val iconSizePx = with(LocalDensity.current) { iconSize.roundToPx() }
     val appInfo = info.applicationInfo
+    val cachedBitmap = remember(info.packageName, iconSizePx, synthesizeAdaptiveIcons) {
+        AppIconCache.getCachedBitmap(info.packageName, myUserId, iconSizePx)?.asImageBitmap()
+    }
 
     val bitmap by produceState<ImageBitmap?>(
-        initialValue = null,
+        initialValue = cachedBitmap,
         key1 = info.packageName,
         key2 = appInfo != null,
         key3 = synthesizeAdaptiveIcons,
     ) {
-        value = withContext(Dispatchers.IO) {
-            val loaded: Bitmap = if (appInfo != null) {
-                AppIconCache.getOrLoadBitmap(context, appInfo, myUserId, iconSizePx)
-            } else {
-                context.packageManager.defaultActivityIcon.toBitmap(iconSizePx, iconSizePx)
+        if (value == null) {
+            value = withContext(Dispatchers.IO) {
+                val loaded: Bitmap = if (appInfo != null) {
+                    AppIconCache.getOrLoadBitmap(context, appInfo, myUserId, iconSizePx)
+                } else {
+                    context.packageManager.defaultActivityIcon.toBitmap(iconSizePx, iconSizePx)
+                }
+                loaded.asImageBitmap()
             }
-            loaded.asImageBitmap()
         }
     }
 

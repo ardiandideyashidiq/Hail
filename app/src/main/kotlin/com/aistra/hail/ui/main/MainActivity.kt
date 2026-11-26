@@ -153,6 +153,10 @@ class MainActivity : AppCompatActivity(), NavController.OnDestinationChangedList
                                 NavOptions.Builder()
                                     .setLaunchSingleTop(true)
                                     .setRestoreState(true)
+                                    .setEnterAnim(android.R.anim.fade_in)
+                                    .setExitAnim(android.R.anim.fade_out)
+                                    .setPopEnterAnim(android.R.anim.fade_in)
+                                    .setPopExitAnim(android.R.anim.fade_out)
                                     .setPopUpTo(
                                         navController.graph.findStartDestination().id,
                                         inclusive = false,
