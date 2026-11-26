@@ -27,17 +27,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -89,10 +89,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.integerResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -101,13 +97,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.aistra.hail.R
 import com.aistra.hail.app.AppInfo
-import com.aistra.hail.ui.components.ExpressiveButtonGroupItem
-import com.aistra.hail.ui.components.ExpressiveConnectedButtonGroup
+import com.aistra.hail.ui.components.BentoStatusCard
 import com.aistra.hail.ui.components.ExpressiveFabMenu
 import com.aistra.hail.ui.components.ExpressiveFabMenuItem
 import com.aistra.hail.ui.components.ExpressiveFloatingToolbar
 import com.aistra.hail.ui.components.ExpressiveFloatingToolbarAction
 import com.aistra.hail.ui.components.ExpressiveLoadingIndicator
+import com.aistra.hail.ui.components.TactilePillTab
 import com.aistra.hail.ui.theme.HailMotionTokens
 import com.aistra.hail.ui.theme.rememberReducedMotion
 import com.aistra.hail.utils.AppIconCache
@@ -128,6 +124,7 @@ fun HomeScreen(
     appsForTag: (Int) -> List<AppInfo>,
     searchResults: List<AppInfo>,
     refreshTick: Int,
+    workingModeLabel: String,
     compactIcon: Boolean,
     homeFontSize: Float,
     grayscaleIcon: Boolean,
@@ -149,12 +146,14 @@ fun HomeScreen(
 ) {
     val reducedMotion = rememberReducedMotion()
     val coroutineScope = rememberCoroutineScope()
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val bottomInsetModifier = if (isLandscape) {
-        Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-    } else {
-        Modifier
-    }
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val useRail = isLandscape || configuration.screenWidthDp >= 600
+    val bottomInsetModifier = Modifier.windowInsetsPadding(
+        WindowInsets.navigationBars.only(WindowInsetsSides.Bottom),
+    )
+    val floatingBottomPadding = if (useRail) 16.dp else 96.dp
+    val gridBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 112.dp
 
     val safePageCount = tags.size.coerceAtLeast(1)
     val pagerState = rememberPagerState(
@@ -243,7 +242,7 @@ fun HomeScreen(
                         synthesizeAdaptiveIcons = synthesizeAdaptiveIcons,
                         selectedPackages = selectedPackages,
                         reducedMotion = reducedMotion,
-                        isLandscape = isLandscape,
+                        bottomPadding = gridBottomPadding,
                         onAppClick = onAppClick,
                         onAppLongClick = onAppLongClick,
                     )
@@ -255,6 +254,14 @@ fun HomeScreen(
                     ) { page ->
                         val tagId = tags.getOrNull(page)?.second ?: 0
                         val pageApps = remember(tagId, refreshTick) { appsForTag(tagId) }
+                        val frozenCount = remember(pageApps, refreshTick) {
+                            pageApps.count { it.state == AppInfo.State.FROZEN }
+                        }
+                        val activeCount = remember(pageApps, refreshTick) {
+                            pageApps.count {
+                                it.state != AppInfo.State.FROZEN && it.state != AppInfo.State.NOT_FOUND
+                            }
+                        }
                         AppGridContent(
                             apps = pageApps,
                             spanCount = spanCount,
@@ -264,9 +271,23 @@ fun HomeScreen(
                             synthesizeAdaptiveIcons = synthesizeAdaptiveIcons,
                             selectedPackages = selectedPackages,
                             reducedMotion = reducedMotion,
-                            isLandscape = isLandscape,
+                            bottomPadding = gridBottomPadding,
                             onAppClick = onAppClick,
                             onAppLongClick = onAppLongClick,
+                            headerContent = {
+                                BentoStatusCard(
+                                    frozenCount = frozenCount,
+                                    activeCount = activeCount,
+                                    workingModeLabel = workingModeLabel,
+                                    primaryActionLabel = stringResource(R.string.action_freeze_current),
+                                    onPrimaryAction = onFreezeCurrent,
+                                    secondaryActionLabel = stringResource(R.string.action_unfreeze_current),
+                                    onSecondaryAction = onUnfreezeCurrent,
+                                    primaryActionIcon = Icons.Rounded.AcUnit,
+                                    secondaryActionIcon = Icons.Rounded.WbSunny,
+                                    modifier = Modifier.padding(bottom = 6.dp),
+                                )
+                            },
                         )
                     }
                 }
@@ -278,7 +299,7 @@ fun HomeScreen(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .then(bottomInsetModifier)
-                .padding(16.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = floatingBottomPadding),
             enter = fadeIn(HailMotionTokens.fastEffectsOrSnap(reducedMotion)) +
                 scaleIn(
                     animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
@@ -321,7 +342,7 @@ fun HomeScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .then(bottomInsetModifier)
-                .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
+                .padding(bottom = floatingBottomPadding, start = 16.dp, end = 16.dp),
         ) {
             ExpressiveFloatingToolbarAction(
                 icon = Icons.Rounded.AcUnit,
@@ -355,7 +376,6 @@ fun HomeScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TagSelectorBar(
     tags: List<Pair<String, Int>>,
@@ -364,92 +384,37 @@ private fun TagSelectorBar(
     onTagLongClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val reducedMotion = rememberReducedMotion()
-
-    if (tags.size in 2..4) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Row(
-            modifier = modifier,
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            ExpressiveConnectedButtonGroup(
-                items = tags.map { ExpressiveButtonGroupItem(value = it.second, label = it.first) },
-                selectedIndex = selectedIndex,
-                onSelect = onSelect,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(
-                onClick = { onTagLongClick(selectedIndex) },
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Edit,
-                    contentDescription = stringResource(R.string.action_tag_set),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    } else {
-        Row(
-            modifier = modifier.horizontalScroll(rememberScrollState()),
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             tags.forEachIndexed { index, (label, _) ->
-                val isSelected = index == selectedIndex
-                val cornerRadius by animateDpAsState(
-                    targetValue = if (isSelected) 20.dp else 12.dp,
-                    animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
-                    label = "ScrollableTagCorner",
+                TactilePillTab(
+                    selected = index == selectedIndex,
+                    onClick = { onSelect(index) },
+                    label = label,
+                    index = index,
+                    selectedIndex = selectedIndex,
                 )
-                val bgColor by animateColorAsState(
-                    targetValue = if (isSelected) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerLow
-                    },
-                    animationSpec = HailMotionTokens.fastEffectsOrSnap(reducedMotion),
-                    label = "ScrollableTagBg",
-                )
-                val fgColor by animateColorAsState(
-                    targetValue = if (isSelected) {
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    animationSpec = HailMotionTokens.fastEffectsOrSnap(reducedMotion),
-                    label = "ScrollableTagFg",
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(cornerRadius),
-                    color = bgColor,
-                    contentColor = fgColor,
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .clip(RoundedCornerShape(cornerRadius))
-                        .combinedClickable(
-                            onClick = { onSelect(index) },
-                            onLongClick = { onTagLongClick(index) },
-                        )
-                        .semantics {
-                            selected = isSelected
-                            role = Role.Tab
-                        },
-                ) {
-                    Box(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
             }
+        }
+        IconButton(
+            onClick = { onTagLongClick(selectedIndex) },
+            modifier = Modifier.size(48.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Edit,
+                contentDescription = stringResource(R.string.action_tag_set),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -464,27 +429,37 @@ private fun AppGridContent(
     synthesizeAdaptiveIcons: Boolean,
     selectedPackages: Set<String>,
     reducedMotion: Boolean,
-    isLandscape: Boolean,
+    bottomPadding: Dp,
     onAppClick: (AppInfo) -> Unit,
     onAppLongClick: (AppInfo) -> Unit,
+    headerContent: (@Composable () -> Unit)? = null,
 ) {
     if (apps.isEmpty()) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-            contentAlignment = Alignment.Center,
+                .verticalScroll(rememberScrollState())
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = bottomPadding),
         ) {
-            Text(
-                text = stringResource(R.string.nothing_here),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (headerContent != null) {
+                headerContent()
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.nothing_here),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         return
     }
 
-    val bottomPadding = if (isLandscape) 112.dp else 96.dp
     LazyVerticalGrid(
         columns = GridCells.Fixed(spanCount),
         modifier = Modifier.fillMaxSize(),
@@ -497,6 +472,14 @@ private fun AppGridContent(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (headerContent != null) {
+            item(
+                span = { GridItemSpan(maxLineSpan) },
+                key = "bento_status_card",
+            ) {
+                headerContent()
+            }
+        }
         items(
             items = apps,
             key = { it.packageName },

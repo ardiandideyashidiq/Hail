@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,6 +106,7 @@ class HomeFragment : MainFragment(), MenuProvider {
                         appsForTag = ::appsForTag,
                         searchResults = if (query.isEmpty()) emptyList() else searchApps(query),
                         refreshTick = refreshTick,
+                        workingModeLabel = remember(refreshTick) { workingModeLabel() },
                         compactIcon = HailData.compactIcon,
                         homeFontSize = HailData.homeFontSize,
                         grayscaleIcon = HailData.grayscaleIcon,
@@ -172,6 +174,12 @@ class HomeFragment : MainFragment(), MenuProvider {
 
     private fun appsForTag(tagId: Int): List<AppInfo> =
         HailData.checkedList.filter { tagId in it.tagIdList }.sortedWith(NameComparator)
+
+    private fun workingModeLabel(): String {
+        val index = HailData.WORKING_MODE_VALUES.indexOf(HailData.workingMode)
+        val entries = resources.getStringArray(R.array.working_mode_entries)
+        return entries.getOrNull(index) ?: getString(R.string.mode_default)
+    }
 
     private fun searchApps(searchQuery: String): List<AppInfo> =
         HailData.checkedList.filter {
