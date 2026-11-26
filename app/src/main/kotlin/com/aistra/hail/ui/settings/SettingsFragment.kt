@@ -10,24 +10,50 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.ArrayRes
 import androidx.annotation.StringRes
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ManageSearch
 import androidx.compose.material.icons.automirrored.outlined.Shortcut
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.MenuHost
@@ -39,13 +65,13 @@ import com.aistra.hail.R
 import com.aistra.hail.app.AppManager
 import com.aistra.hail.app.HailApi
 import com.aistra.hail.app.HailData
-import com.aistra.hail.databinding.DialogInputBinding
 import com.aistra.hail.ui.main.MainActivity
 import com.aistra.hail.ui.main.MainFragment
+import com.aistra.hail.ui.theme.AppShapes
 import com.aistra.hail.ui.theme.AppTheme
+import com.aistra.hail.ui.theme.HailMotionTokens
+import com.aistra.hail.ui.theme.rememberReducedMotion
 import com.aistra.hail.utils.*
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.textview.MaterialTextView
 import com.rosan.dhizuku.api.Dhizuku
 import com.rosan.dhizuku.api.DhizukuRequestPermissionListener
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +86,11 @@ import rikka.shizuku.Shizuku
 
 class SettingsFragment : MainFragment(), MenuProvider {
     private val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    private var showPinShortcutDialog by mutableStateOf(false)
+    private var pinShortcutTagAction by mutableStateOf<String?>(null)
+    private var showDeviceOwnerDialog by mutableStateOf(false)
+    private var showTerminalDialogState by mutableStateOf(false)
+    private var terminalResultState by mutableStateOf<Pair<Int, String?>?>(null)
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val menuHost = requireActivity() as MenuHost
@@ -79,6 +110,40 @@ class SettingsFragment : MainFragment(), MenuProvider {
     @Composable
     private fun SettingsScreen() {
         val autoFreezeAfterLock = rememberPreferenceState(HailData.AUTO_FREEZE_AFTER_LOCK, false)
+        if (showPinShortcutDialog) {
+            PinShortcutDialog(
+                onDismiss = { showPinShortcutDialog = false },
+                onSelectTagAction = { pinShortcutTagAction = it },
+            )
+        }
+        pinShortcutTagAction?.let { action ->
+            PinShortcutTagDialog(
+                action = action,
+                onDismiss = { pinShortcutTagAction = null },
+            )
+        }
+        if (showDeviceOwnerDialog) {
+            DeviceOwnerDialog(onDismiss = { showDeviceOwnerDialog = false })
+        }
+        if (showTerminalDialogState) {
+            TerminalInputDialog(
+                onDismiss = { showTerminalDialogState = false },
+                onExecute = { command ->
+                    showTerminalDialogState = false
+                    lifecycleScope.launch {
+                        val result = AppManager.execute(command)
+                        onTerminalResult(result.first, result.second)
+                    }
+                },
+            )
+        }
+        terminalResultState?.let { (exitValue, msg) ->
+            TerminalResultDialog(
+                exitValue = exitValue,
+                msg = msg,
+                onDismiss = { terminalResultState = null },
+            )
+        }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             listPreference(
                 key = HailData.WORKING_MODE,
@@ -355,78 +420,245 @@ class SettingsFragment : MainFragment(), MenuProvider {
     else HPackages.getApplicationInfoOrNull(pack)?.loadLabel(app.packageManager)?.toString() ?: pack
 
     private fun addPinShortcut() {
-        MaterialAlertDialogBuilder(requireActivity()).setTitle(R.string.action_add_pin_shortcut)
-            .setItems(R.array.pin_shortcut_entries) { _, which ->
-                when (which) {
-                    0 -> MaterialAlertDialogBuilder(requireActivity()).setTitle(R.string.action_freeze_tag)
-                        .setItems(HailData.tags.map { it.first }.toTypedArray()) { _, index ->
-                            val tag = HailData.tags[index].first
+        showPinShortcutDialog = true
+    }
+
+    @Composable
+    private fun DialogOptionItem(
+        text: String,
+        reducedMotion: Boolean = rememberReducedMotion(),
+        onClick: () -> Unit,
+    ) {
+        val interactionSource = remember { MutableInteractionSource() }
+        val isPressed by interactionSource.collectIsPressedAsState()
+        val scale by animateFloatAsState(
+            targetValue = if (isPressed && !reducedMotion) 0.98f else 1f,
+            animationSpec = if (reducedMotion) snap() else HailMotionTokens.FastSpatial,
+            label = "SettingsDialogOptionScale",
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .clip(AppShapes.medium)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = LocalIndication.current,
+                    onClick = onClick,
+                )
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = text, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+
+    @Composable
+    private fun PinShortcutDialog(
+        onDismiss: () -> Unit,
+        onSelectTagAction: (String) -> Unit,
+    ) {
+        val entries = stringArrayResource(R.array.pin_shortcut_entries)
+        val reducedMotion = rememberReducedMotion()
+        AlertDialog(
+            shape = AppShapes.extraLarge,
+            onDismissRequest = onDismiss,
+            title = { Text(text = stringResource(R.string.action_add_pin_shortcut)) },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    entries.forEachIndexed { which, label ->
+                        DialogOptionItem(text = label, reducedMotion = reducedMotion) {
+                            onDismiss()
+                            when (which) {
+                                0 -> onSelectTagAction(HailApi.ACTION_FREEZE_TAG)
+                                1 -> onSelectTagAction(HailApi.ACTION_UNFREEZE_TAG)
+                                2 -> HShortcuts.addPinShortcut(
+                                    AppCompatResources.getDrawable(
+                                        requireContext(), R.drawable.ic_round_frozen_shortcut
+                                    )!!,
+                                    HailApi.ACTION_FREEZE_ALL,
+                                    getString(R.string.action_freeze_all),
+                                    Intent(HailApi.ACTION_FREEZE_ALL),
+                                )
+                                3 -> HShortcuts.addPinShortcut(
+                                    AppCompatResources.getDrawable(
+                                        requireContext(), R.drawable.ic_round_unfrozen_shortcut
+                                    )!!,
+                                    HailApi.ACTION_UNFREEZE_ALL,
+                                    getString(R.string.action_unfreeze_all),
+                                    Intent(HailApi.ACTION_UNFREEZE_ALL),
+                                )
+                                4 -> HShortcuts.addPinShortcut(
+                                    AppCompatResources.getDrawable(
+                                        requireContext(), R.drawable.ic_round_frozen_shortcut
+                                    )!!,
+                                    HailApi.ACTION_FREEZE_NON_WHITELISTED,
+                                    getString(R.string.action_freeze_non_whitelisted),
+                                    Intent(HailApi.ACTION_FREEZE_NON_WHITELISTED),
+                                )
+                                5 -> HShortcuts.addPinShortcut(
+                                    AppCompatResources.getDrawable(
+                                        requireContext(), R.drawable.ic_outline_lock_shortcut
+                                    )!!,
+                                    HailApi.ACTION_LOCK,
+                                    getString(R.string.action_lock),
+                                    Intent(HailApi.ACTION_LOCK),
+                                )
+                                6 -> HShortcuts.addPinShortcut(
+                                    AppCompatResources.getDrawable(
+                                        requireContext(), R.drawable.ic_outline_lock_shortcut
+                                    )!!,
+                                    HailApi.ACTION_LOCK_FREEZE,
+                                    getString(R.string.action_lock_freeze),
+                                    Intent(HailApi.ACTION_LOCK_FREEZE),
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(text = stringResource(android.R.string.cancel)) }
+            },
+        )
+    }
+
+    @Composable
+    private fun PinShortcutTagDialog(
+        action: String,
+        onDismiss: () -> Unit,
+    ) {
+        val isFreeze = action == HailApi.ACTION_FREEZE_TAG
+        val titleRes = if (isFreeze) R.string.action_freeze_tag else R.string.action_unfreeze_tag
+        val drawableRes = if (isFreeze) R.drawable.ic_round_frozen_shortcut else R.drawable.ic_round_unfrozen_shortcut
+        val reducedMotion = rememberReducedMotion()
+        AlertDialog(
+            shape = AppShapes.extraLarge,
+            onDismissRequest = onDismiss,
+            title = { Text(text = stringResource(titleRes)) },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    HailData.tags.forEach { (tag, _) ->
+                        DialogOptionItem(text = tag, reducedMotion = reducedMotion) {
+                            onDismiss()
                             HShortcuts.addPinShortcut(
-                                AppCompatResources.getDrawable(
-                                    requireContext(), R.drawable.ic_round_frozen_shortcut
-                                )!!,
-                                HailApi.ACTION_FREEZE_TAG + tag,
+                                AppCompatResources.getDrawable(requireContext(), drawableRes)!!,
+                                action + tag,
                                 tag,
-                                HailApi.getIntentForTag(HailApi.ACTION_FREEZE_TAG, tag)
+                                HailApi.getIntentForTag(action, tag),
                             )
-                        }.setNegativeButton(android.R.string.cancel, null).show()
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(text = stringResource(android.R.string.cancel)) }
+            },
+        )
+    }
 
-                    1 -> MaterialAlertDialogBuilder(requireActivity()).setTitle(R.string.action_unfreeze_tag)
-                        .setItems(HailData.tags.map { it.first }.toTypedArray()) { _, index ->
-                            val tag = HailData.tags[index].first
-                            HShortcuts.addPinShortcut(
-                                AppCompatResources.getDrawable(
-                                    requireContext(), R.drawable.ic_round_unfrozen_shortcut
-                                )!!,
-                                HailApi.ACTION_UNFREEZE_TAG + tag,
-                                tag,
-                                HailApi.getIntentForTag(HailApi.ACTION_UNFREEZE_TAG, tag)
-                            )
-                        }.setNegativeButton(android.R.string.cancel, null).show()
+    @Composable
+    private fun DeviceOwnerDialog(onDismiss: () -> Unit) = AlertDialog(
+        shape = AppShapes.extraLarge,
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(R.string.title_set_owner)) },
+        text = {
+            SelectionContainer {
+                Text(text = stringResource(R.string.msg_set_owner, HPolicy.ADB_COMMAND))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(text = stringResource(android.R.string.ok)) }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                HUI.copyText(HPolicy.ADB_COMMAND)
+                onDismiss()
+            }) {
+                Text(text = stringResource(android.R.string.copy))
+            }
+        },
+    )
 
-                    2 -> HShortcuts.addPinShortcut(
-                        AppCompatResources.getDrawable(
-                            requireContext(), R.drawable.ic_round_frozen_shortcut
-                        )!!,
-                        HailApi.ACTION_FREEZE_ALL,
-                        getString(R.string.action_freeze_all),
-                        Intent(HailApi.ACTION_FREEZE_ALL)
-                    )
+    @Composable
+    private fun TerminalInputDialog(
+        onDismiss: () -> Unit,
+        onExecute: (String) -> Unit,
+    ) {
+        var command by remember { mutableStateOf("") }
+        AlertDialog(
+            shape = AppShapes.extraLarge,
+            onDismissRequest = onDismiss,
+            title = { Text(text = stringResource(R.string.action_terminal)) },
+            text = {
+                OutlinedTextField(
+                    value = command,
+                    onValueChange = { command = it },
+                    label = { Text(text = stringResource(R.string.command)) },
+                    singleLine = true,
+                    shape = AppShapes.medium,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onExecute(command) }) {
+                    Text(text = stringResource(android.R.string.ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) {
+                    Text(text = stringResource(android.R.string.cancel))
+                }
+            },
+        )
+    }
 
-                    3 -> HShortcuts.addPinShortcut(
-                        AppCompatResources.getDrawable(
-                            requireContext(), R.drawable.ic_round_unfrozen_shortcut
-                        )!!,
-                        HailApi.ACTION_UNFREEZE_ALL,
-                        getString(R.string.action_unfreeze_all),
-                        Intent(HailApi.ACTION_UNFREEZE_ALL)
-                    )
-
-                    4 -> HShortcuts.addPinShortcut(
-                        AppCompatResources.getDrawable(
-                            requireContext(), R.drawable.ic_round_frozen_shortcut
-                        )!!,
-                        HailApi.ACTION_FREEZE_NON_WHITELISTED,
-                        getString(R.string.action_freeze_non_whitelisted),
-                        Intent(HailApi.ACTION_FREEZE_NON_WHITELISTED)
-                    )
-
-                    5 -> HShortcuts.addPinShortcut(
-                        AppCompatResources.getDrawable(
-                            requireContext(), R.drawable.ic_outline_lock_shortcut
-                        )!!, HailApi.ACTION_LOCK, getString(R.string.action_lock), Intent(HailApi.ACTION_LOCK)
-                    )
-
-                    6 -> HShortcuts.addPinShortcut(
-                        AppCompatResources.getDrawable(
-                            requireContext(), R.drawable.ic_outline_lock_shortcut
-                        )!!,
-                        HailApi.ACTION_LOCK_FREEZE,
-                        getString(R.string.action_lock_freeze),
-                        Intent(HailApi.ACTION_LOCK_FREEZE)
+    @Composable
+    private fun TerminalResultDialog(
+        exitValue: Int,
+        msg: String?,
+        onDismiss: () -> Unit,
+    ) {
+        val hasMessage = !msg.isNullOrBlank()
+        val failedTitle = if (hasMessage && exitValue != 0) {
+            stringResource(R.string.operation_failed, exitValue.toString())
+        } else null
+        val bodyText = when {
+            hasMessage -> msg
+            exitValue != 0 -> stringResource(R.string.operation_failed, exitValue.toString())
+            else -> ""
+        }
+        AlertDialog(
+            shape = AppShapes.extraLarge,
+            onDismissRequest = onDismiss,
+            title = failedTitle?.let { title -> { Text(text = title) } },
+            text = {
+                SelectionContainer {
+                    Text(
+                        text = bodyText,
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
                     )
                 }
-            }.setNegativeButton(android.R.string.cancel, null).show()
+            },
+            confirmButton = {
+                TextButton(onClick = onDismiss) { Text(text = stringResource(android.R.string.ok)) }
+            },
+            dismissButton = if (hasMessage) {
+                {
+                    TextButton(onClick = {
+                        HUI.copyText(msg)
+                        onDismiss()
+                    }) {
+                        Text(text = stringResource(android.R.string.copy))
+                    }
+                }
+            } else null,
+        )
     }
 
     fun onWorkingModeChange(rememberState: MutableState<String>, mode: String): Boolean {
@@ -434,11 +666,7 @@ class SettingsFragment : MainFragment(), MenuProvider {
         activity.invalidateOptionsMenu()
         when {
             mode.startsWith(HailData.OWNER) -> if (!HPolicy.isDeviceOwnerActive) {
-                MaterialAlertDialogBuilder(requireActivity()).setTitle(R.string.title_set_owner)
-                    .setMessage(getString(R.string.msg_set_owner, HPolicy.ADB_COMMAND))
-                    .setPositiveButton(android.R.string.ok, null)
-                    .setNeutralButton(android.R.string.copy) { _, _ -> HUI.copyText(HPolicy.ADB_COMMAND) }.show()
-                    .findViewById<MaterialTextView>(android.R.id.message)?.setTextIsSelectable(true)
+                showDeviceOwnerDialog = true
                 return false
             }
 
@@ -555,18 +783,7 @@ class SettingsFragment : MainFragment(), MenuProvider {
 
     private suspend fun onTerminalResult(exitValue: Int, msg: String?) = withContext(Dispatchers.Main) {
         if (exitValue == 0 && msg.isNullOrBlank()) return@withContext
-        MaterialAlertDialogBuilder(requireActivity()).apply {
-            if (!msg.isNullOrBlank()) {
-                if (exitValue != 0) {
-                    setTitle(getString(R.string.operation_failed, exitValue.toString()))
-                }
-                setMessage(msg)
-                setNeutralButton(android.R.string.copy) { _, _ -> HUI.copyText(msg) }
-            } else if (exitValue != 0) {
-                setMessage(getString(R.string.operation_failed, exitValue.toString()))
-            }
-        }.setPositiveButton(android.R.string.ok, null).show().findViewById<MaterialTextView>(android.R.id.message)
-            ?.setTextIsSelectable(true)
+        terminalResultState = exitValue to msg
     }
 
     override fun onMenuItemSelected(item: MenuItem): Boolean {
@@ -592,18 +809,6 @@ class SettingsFragment : MainFragment(), MenuProvider {
     }
 
     private fun showTerminalDialog() {
-        val binding = DialogInputBinding.inflate(layoutInflater)
-        binding.inputLayout.setHint(R.string.command)
-        binding.editText.run {
-            setSingleLine()
-            filters = arrayOf()
-        }
-        MaterialAlertDialogBuilder(requireActivity()).setTitle(R.string.action_terminal).setView(binding.root)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                lifecycleScope.launch {
-                    val result = AppManager.execute(binding.editText.text.toString())
-                    onTerminalResult(result.first, result.second)
-                }
-            }.setNegativeButton(android.R.string.cancel, null).show()
+        showTerminalDialogState = true
     }
 }
