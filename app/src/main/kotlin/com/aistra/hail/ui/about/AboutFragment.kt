@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -87,7 +88,9 @@ class AboutFragment : MainFragment() {
         if (openWeChatQrDialog) WeChatQrDialog { openWeChatQrDialog = false }
 
         Column(
-            modifier = Modifier.verticalScroll(state = rememberScrollState())
+            modifier = Modifier
+                .verticalScroll(state = rememberScrollState())
+                .padding(bottom = 104.dp)
         ) {
             Spacer(modifier = Modifier.height(dimensionResource(R.dimen.padding_medium)))
             Card(
@@ -100,17 +103,25 @@ class AboutFragment : MainFragment() {
                         scaleX = heroScale
                         scaleY = heroScale
                     },
-                shape = AppShapes.extraLarge,
+                shape = RoundedCornerShape(28.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 ),
                 interactionSource = heroInteractionSource,
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
+                    verticalArrangement = Arrangement.spacedBy(
                         dimensionResource(R.dimen.padding_extra_small), Alignment.CenterVertically
-                    ), horizontalAlignment = Alignment.CenterHorizontally
+                    ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Image(
                         painter = painterResource(R.drawable.ic_launcher_foreground),
@@ -124,7 +135,7 @@ class AboutFragment : MainFragment() {
                     Text(
                         text = stringResource(R.string.app_slogan),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -193,9 +204,13 @@ class AboutFragment : MainFragment() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = dimensionResource(R.dimen.padding_medium)),
-        shape = AppShapes.large,
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
         ),
         content = content,
     )
