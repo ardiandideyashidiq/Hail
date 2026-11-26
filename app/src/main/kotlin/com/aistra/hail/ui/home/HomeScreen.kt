@@ -426,7 +426,7 @@ private fun TagSelectorBar(
                     color = bgColor,
                     contentColor = fgColor,
                     modifier = Modifier
-                        .heightIn(min = 40.dp)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(cornerRadius))
                         .combinedClickable(
                             onClick = { onSelect(index) },
