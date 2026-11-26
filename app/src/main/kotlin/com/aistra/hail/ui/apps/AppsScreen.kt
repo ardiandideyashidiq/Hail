@@ -1,15 +1,15 @@
 package com.aistra.hail.ui.apps
 
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MoreVert
@@ -58,6 +59,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.integerResource
@@ -67,9 +69,8 @@ import androidx.compose.ui.unit.dp
 import com.aistra.hail.R
 import com.aistra.hail.app.AppManager
 import com.aistra.hail.app.HailData
-import com.aistra.hail.ui.components.ExpressiveButtonGroupItem
-import com.aistra.hail.ui.components.ExpressiveConnectedButtonGroup
 import com.aistra.hail.ui.components.ExpressiveLoadingIndicator
+import com.aistra.hail.ui.components.TactilePillTab
 import com.aistra.hail.ui.theme.AppShapes
 import com.aistra.hail.ui.theme.HailMotionTokens
 import com.aistra.hail.ui.theme.rememberReducedMotion
@@ -99,28 +100,20 @@ fun AppsScreen(
     modifier: Modifier = Modifier,
 ) {
     val spanCount = integerResource(R.integer.apps_span).coerceAtLeast(1)
+    val configuration = LocalConfiguration.current
+    val useRail = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ||
+        configuration.screenWidthDp >= 600
+    val bottomContentPadding = if (useRail) 24.dp else 104.dp
     val pullToRefreshState = rememberPullToRefreshState()
 
     val quickFilterItems = listOf(
-        ExpressiveButtonGroupItem(
-            value = AppsQuickFilter.USER,
-            label = stringResource(R.string.filter_user_apps),
-        ),
-        ExpressiveButtonGroupItem(
-            value = AppsQuickFilter.SYSTEM,
-            label = stringResource(R.string.filter_system_apps),
-        ),
-        ExpressiveButtonGroupItem(
-            value = AppsQuickFilter.FROZEN,
-            label = stringResource(R.string.filter_frozen_apps),
-        ),
-        ExpressiveButtonGroupItem(
-            value = AppsQuickFilter.UNFROZEN,
-            label = stringResource(R.string.filter_unfrozen_apps),
-        ),
+        AppsQuickFilter.USER to stringResource(R.string.filter_user_apps),
+        AppsQuickFilter.SYSTEM to stringResource(R.string.filter_system_apps),
+        AppsQuickFilter.FROZEN to stringResource(R.string.filter_frozen_apps),
+        AppsQuickFilter.UNFROZEN to stringResource(R.string.filter_unfrozen_apps),
     )
     val selectedFilterIndex = quickFilterItems
-        .indexOfFirst { it.value == filterState.activeQuickFilter }
+        .indexOfFirst { it.first == filterState.activeQuickFilter }
         .coerceAtLeast(0)
 
     Column(
@@ -128,16 +121,24 @@ fun AppsScreen(
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.navigationBars),
     ) {
-        ExpressiveConnectedButtonGroup(
-            items = quickFilterItems,
-            selectedIndex = selectedFilterIndex,
-            onSelect = { index ->
-                onQuickFilterSelected(quickFilterItems[index].value)
-            },
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            quickFilterItems.forEachIndexed { index, (filter, label) ->
+                TactilePillTab(
+                    selected = index == selectedFilterIndex,
+                    onClick = { onQuickFilterSelected(filter) },
+                    label = label,
+                    index = index,
+                    selectedIndex = selectedFilterIndex,
+                )
+            }
+        }
 
         PullToRefreshBox(
             isRefreshing = isRefreshing,
@@ -169,13 +170,13 @@ fun AppsScreen(
                 columns = GridCells.Fixed(spanCount),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
-                    start = 12.dp,
-                    end = 12.dp,
-                    top = 4.dp,
-                    bottom = 24.dp,
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 8.dp,
+                    bottom = bottomContentPadding,
                 ),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(
                     items = apps,
@@ -259,7 +260,7 @@ private fun AppItemCard(
         label = "AppCardScale",
     )
     val cornerRadius by animateDpAsState(
-        targetValue = if (isChecked) 24.dp else 16.dp,
+        targetValue = if (isChecked) 28.dp else 20.dp,
         animationSpec = HailMotionTokens.fastSpatialOrSnap(reducedMotion),
         label = "AppCardCorner",
     )
@@ -267,7 +268,7 @@ private fun AppItemCard(
         targetValue = if (isChecked) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
+            MaterialTheme.colorScheme.surfaceContainerHigh
         },
         animationSpec = HailMotionTokens.fastEffectsOrSnap(reducedMotion),
         label = "AppCardContainer",
@@ -323,7 +324,7 @@ private fun AppItemCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
